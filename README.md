@@ -31,6 +31,9 @@
 
 打开 ReShade overlay 后进入 **DLSS5 Presets**：
 
+插件会跟随 ReShade 的当前界面语言：读取 ReShade 配置中的 `[OVERLAY] Language`；当该项为空时使用 Windows 当前 UI 语言。当前内置翻译包括 English、简体中文、繁體中文、日本語、한국어、Français、Deutsch、Español 和 Русский；未覆盖的语言会回退到 English。切换 ReShade 语言后，插件面板和状态提示会在下一帧更新（ReShade 的插件菜单标题通常需要重新打开 overlay 或重启游戏才会刷新）。
+
+
 - 点击预设名称或 **Apply**：应用该文件；
 - 每个预设旁的 **Share**：生成一个只包含该预设的短分享码；
 - **Copy code** / **Paste code**：通过剪贴板发送或接收分享码；
@@ -50,6 +53,8 @@
 - 对于 ReShade 的 `[GENERAL]`、`[INPUT]`、`[ADDON]` 等 host-level 配置，插件不通过逐键写入方式覆盖它们；ReShade effect preset 应使用 `set_current_preset_path` 由 ReShade 自己加载。这避免共享预设意外关闭 add-on 或修改快捷键。
 - 配置 API 没有公开的“删除键”操作，因此原本不存在的 RenoDX key 在清除时会恢复为空字符串；如果目标 add-on 将空字符串视为默认值，这就是预期行为，否则建议在预设中写出明确的默认值。
 - 插件只负责配置对接，不实现 RenoDX 内部 hook，也不替代 `renodx-dlss.addon64` 或 `renodx-dlss5.addon64`。如果某个 RenoDX 版本只在进程启动时读取配置，那么切换后需要按该版本要求重启游戏；插件无法通过公开 ReShade API 强制刷新 RenoDX 的私有运行时状态。
+
+源码文件使用 UTF-8 编码，`build.cmd` 会以 `/utf-8` 编译，避免多语言字符串在中文 Windows 开发者命令行中被错误解析。
 
 ## 构建
 

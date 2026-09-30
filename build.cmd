@@ -25,7 +25,7 @@ cd /d "%~dp0"
 rc /nologo version.rc
 if errorlevel 1 exit /b 1
 
-cl /nologo /W4 /O2 /MT /EHsc /std:c++17 /I. /Iimgui /Ireshade /LD ^
+cl /nologo /W4 /O2 /MT /EHsc /std:c++17 /utf-8 /I. /Iimgui /Ireshade /LD ^
    dlss5-preset-switcher.cpp version.res ^
    /Fe:dlss5-preset-switcher.addon64 ^
    /link /DLL user32.lib version.lib

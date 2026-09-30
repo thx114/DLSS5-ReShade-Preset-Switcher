@@ -11,6 +11,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#pragma execution_character_set("utf-8")
 #include <windows.h>
 
 #define ImTextureID ImU64
@@ -38,10 +39,126 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr const char *kName = "DLSS5 Preset Switcher";
-constexpr const char *kVersion = "1.1.0";
+constexpr const char *kVersion = "1.2.0";
 constexpr const char *kOverlayTitle = "DLSS5 Presets";
 constexpr const char *kConfigFile = "dlss5-preset-switcher.ini";
 constexpr const char *kPresetFolder = "DLSS5-Presets";
+
+enum class Language {
+    English,
+    SimplifiedChinese,
+    TraditionalChinese,
+    Japanese,
+    Korean,
+    French,
+    German,
+    Spanish,
+    Russian,
+};
+
+enum class TextId {
+    OverlayTitle,
+    DropHint,
+    RenoHint,
+    AutoReload,
+    Refresh,
+    NoPresets,
+    Apply,
+    Share,
+    QuickShare,
+    ImportFilename,
+    CopyCode,
+    PasteCode,
+    ImportPreset,
+    ImportAndApply,
+    ShareActive,
+    CodeLength,
+    ClearRestore,
+    Active,
+    Ready,
+    CannotShare,
+    ShareCodeTooLarge,
+    ShareGenerated,
+    GenerateFirst,
+    ShareCopied,
+    ClipboardInvalid,
+    SharePasted,
+    InvalidShareCode,
+    CreateDirectory,
+    WriteImported,
+    Imported,
+    CannotRead,
+    AutoReloaded,
+    Applied,
+    Cleared,
+};
+
+struct Translation {
+    const char *text[9];
+};
+
+// ReShade stores its selected UI language as a BCP-47 locale name in
+// [OVERLAY] Language. The add-on keeps its own small table because the public
+// ReShade add-on SDK does not expose the host's localization resources.
+const Translation kTranslations[] = {
+    {{ "DLSS5 Presets", "DLSS5 预设", "DLSS5 預設", "DLSS5 プリセット", "DLSS5 프리셋", "Préréglages DLSS5", "DLSS5-Voreinstellungen", "Preajustes DLSS5", "Пресеты DLSS5" }},
+    {{ "Drop UTF-8 .ini files beside the add-on or in DLSS5-Presets\\", "将 UTF-8 .ini 文件放在插件旁边或 DLSS5-Presets\\ 中", "將 UTF-8 .ini 檔案放在外掛程式旁或 DLSS5-Presets\\ 中", "UTF-8 の .ini ファイルをアドオンの隣または DLSS5-Presets\\ に置いてください", "UTF-8 .ini 파일을 애드온 옆 또는 DLSS5-Presets\\에 넣으세요", "Placez les fichiers .ini UTF-8 à côté de l'add-on ou dans DLSS5-Presets\\", "Legen Sie UTF-8-.ini-Dateien neben das Add-on oder in DLSS5-Presets\\", "Coloca los archivos .ini UTF-8 junto al complemento o en DLSS5-Presets\\", "Поместите UTF-8 .ini рядом с аддоном или в DLSS5-Presets\\" }},
+    {{ "RenoDX sections are applied through ReShade config API.", "RenoDX 配置段通过 ReShade 配置 API 应用。", "RenoDX 設定區段會透過 ReShade 設定 API 套用。", "RenoDX セクションは ReShade 設定 API 経由で適用されます。", "RenoDX 섹션은 ReShade 구성 API를 통해 적용됩니다.", "Les sections RenoDX sont appliquées via l'API de configuration de ReShade.", "RenoDX-Abschnitte werden über die ReShade-Konfigurations-API angewendet.", "Las secciones de RenoDX se aplican mediante la API de configuración de ReShade.", "Разделы RenoDX применяются через API конфигурации ReShade." }},
+    {{ "Auto-reload active file", "自动重新加载当前文件", "自動重新載入目前檔案", "アクティブなファイルを自動再読み込み", "활성 파일 자동 다시 로드", "Recharger automatiquement le fichier actif", "Aktive Datei automatisch neu laden", "Recargar automáticamente el archivo activo", "Автоматически перезагружать активный файл" }},
+    {{ "Refresh files", "刷新文件", "重新整理檔案", "ファイルを更新", "파일 새로 고침", "Actualiser les fichiers", "Dateien aktualisieren", "Actualizar archivos", "Обновить файлы" }},
+    {{ "No .ini presets found.", "未找到 .ini 预设。", "找不到 .ini 預設。", ".ini プリセットが見つかりません。", ".ini 프리셋을 찾을 수 없습니다.", "Aucun préréglage .ini trouvé.", "Keine .ini-Voreinstellungen gefunden.", "No se encontraron preajustes .ini.", "Пресеты .ini не найдены." }},
+    {{ "Apply", "应用", "套用", "適用", "적용", "Appliquer", "Anwenden", "Aplicar", "Применить" }},
+    {{ "Share", "分享", "分享", "共有", "공유", "Partager", "Teilen", "Compartir", "Поделиться" }},
+    {{ "Quick share (one preset per code; compressed and clipboard-safe):", "快速分享（每个分享码包含一个预设；已压缩且适合剪贴板）：", "快速分享（每個分享碼包含一個預設；已壓縮且適合剪貼簿）：", "クイック共有（1コードにつき1プリセット、圧縮・クリップボード対応）：", "빠른 공유 (코드 하나에 프리셋 하나, 압축 및 클립보드 안전):", "Partage rapide (un préréglage par code, compressé et adapté au presse-papiers) :", "Schnellfreigabe (eine Voreinstellung pro Code, komprimiert und zwischenablagegeeignet):", "Compartición rápida (un preajuste por código; comprimido y compatible con el portapapeles):", "Быстрая отправка (один пресет на код; сжатие и безопасная вставка):" }},
+    {{ "Import filename", "导入文件名", "匯入檔名", "インポートするファイル名", "가져올 파일 이름", "Nom du fichier importé", "Importdateiname", "Nombre del archivo importado", "Имя импортируемого файла" }},
+    {{ "Copy code", "复制代码", "複製代碼", "コードをコピー", "코드 복사", "Copier le code", "Code kopieren", "Copiar código", "Скопировать код" }},
+    {{ "Paste code", "粘贴代码", "貼上代碼", "コードを貼り付け", "코드 붙여넣기", "Coller le code", "Pegar código", "Pegar código", "Вставить код" }},
+    {{ "Import preset", "导入预设", "匯入預設", "プリセットをインポート", "프리셋 가져오기", "Importer le préréglage", "Voreinstellung importieren", "Importar preajuste", "Импортировать пресет" }},
+    {{ "Import & apply", "导入并应用", "匯入並套用", "インポートして適用", "가져와서 적용", "Importer et appliquer", "Importieren und anwenden", "Importar y aplicar", "Импортировать и применить" }},
+    {{ "Share active", "分享当前预设", "分享目前預設", "アクティブを共有", "활성 프리셋 공유", "Partager l'actif", "Aktive teilen", "Compartir activo", "Поделиться активным" }},
+    {{ "Code length", "代码长度", "代碼長度", "コード長", "코드 길이", "Longueur du code", "Codelänge", "Longitud del código", "Длина кода" }},
+    {{ "Clear / restore original", "清除 / 恢复原始设置", "清除 / 還原原始設定", "クリア / 元の設定を復元", "지우기 / 원래 설정 복원", "Effacer / restaurer l'original", "Löschen / Original wiederherstellen", "Borrar / restaurar original", "Очистить / восстановить исходные" }},
+    {{ "Active: {0}", "当前：{0}", "目前：{0}", "アクティブ: {0}", "활성: {0}", "Actif : {0}", "Aktiv: {0}", "Activo: {0}", "Активный: {0}" }},
+    {{ "Ready", "就绪", "就緒", "準備完了", "준비됨", "Prêt", "Bereit", "Listo", "Готово" }},
+    {{ "Cannot share this preset (empty, unreadable, or larger than 256 KiB)", "无法分享此预设（为空、无法读取或大于 256 KiB）", "無法分享此預設（為空、無法讀取或大於 256 KiB）", "このプリセットを共有できません（空、読み取れない、または256 KiB超過）", "이 프리셋을 공유할 수 없습니다 (비어 있거나 읽을 수 없거나 256 KiB 초과)", "Impossible de partager ce préréglage (vide, illisible ou supérieur à 256 Kio)", "Diese Voreinstellung kann nicht geteilt werden (leer, nicht lesbar oder größer als 256 KiB)", "No se puede compartir este preajuste (vacío, ilegible o mayor de 256 KiB)", "Не удалось поделиться пресетом (пустой, нечитаемый или больше 256 КиБ)" }},
+    {{ "Share code is too large", "分享码过大", "分享碼過大", "共有コードが大きすぎます", "공유 코드가 너무 큽니다", "Le code de partage est trop volumineux", "Freigabecode ist zu groß", "El código compartido es demasiado grande", "Код слишком большой" }},
+    {{ "Share code generated: {0} ({1} chars)", "已生成分享码：{0}（{1} 个字符）", "已產生分享碼：{0}（{1} 個字元）", "共有コードを生成: {0}（{1}文字）", "공유 코드 생성됨: {0} ({1}자)", "Code généré : {0} ({1} caractères)", "Freigabecode erstellt: {0} ({1} Zeichen)", "Código generado: {0} ({1} caracteres)", "Код создан: {0} ({1} симв.)" }},
+    {{ "Generate or paste a share code first", "请先生成或粘贴分享码", "請先產生或貼上分享碼", "先に共有コードを生成または貼り付けてください", "먼저 공유 코드를 생성하거나 붙여넣으세요", "Générez ou collez d'abord un code", "Erstellen oder fügen Sie zuerst einen Freigabecode ein", "Genera o pega primero un código", "Сначала создайте или вставьте код" }},
+    {{ "Share code copied to clipboard", "分享码已复制到剪贴板", "分享碼已複製到剪貼簿", "共有コードをクリップボードにコピーしました", "공유 코드를 클립보드에 복사했습니다", "Code copié dans le presse-papiers", "Freigabecode in die Zwischenablage kopiert", "Código copiado al portapapeles", "Код скопирован в буфер обмена" }},
+    {{ "Clipboard is empty or the share code is too large", "剪贴板为空或分享码过大", "剪貼簿為空或分享碼過大", "クリップボードが空か、共有コードが大きすぎます", "클립보드가 비어 있거나 공유 코드가 너무 큽니다", "Le presse-papiers est vide ou le code est trop volumineux", "Zwischenablage ist leer oder der Freigabecode ist zu groß", "El portapapeles está vacío o el código es demasiado grande", "Буфер обмена пуст или код слишком большой" }},
+    {{ "Share code pasted; click Import preset to receive it", "分享码已粘贴；点击“导入预设”接收", "分享碼已貼上；點擊「匯入預設」接收", "共有コードを貼り付けました。「プリセットをインポート」をクリックしてください", "공유 코드를 붙여넣었습니다. 프리셋 가져오기를 클릭하세요", "Code collé ; cliquez sur « Importer le préréglage » pour le recevoir", "Freigabecode eingefügt; klicken Sie auf „Voreinstellung importieren“", "Código pegado; haz clic en «Importar preajuste» para recibirlo", "Код вставлен; нажмите «Импортировать пресет»" }},
+    {{ "Invalid or corrupted D5P1 share code", "D5P1 分享码无效或已损坏", "D5P1 分享碼無效或已損毀", "D5P1共有コードが無効または破損しています", "잘못되었거나 손상된 D5P1 공유 코드", "Code D5P1 invalide ou corrompu", "Ungültiger oder beschädigter D5P1-Freigabecode", "Código D5P1 no válido o dañado", "Недействительный или повреждённый код D5P1" }},
+    {{ "Cannot create DLSS5-Presets directory", "无法创建 DLSS5-Presets 文件夹", "無法建立 DLSS5-Presets 資料夾", "DLSS5-Presets フォルダーを作成できません", "DLSS5-Presets 폴더를 만들 수 없습니다", "Impossible de créer le dossier DLSS5-Presets", "Ordner DLSS5-Presets kann nicht erstellt werden", "No se puede crear la carpeta DLSS5-Presets", "Не удалось создать папку DLSS5-Presets" }},
+    {{ "Cannot write imported preset", "无法写入导入的预设", "無法寫入匯入的預設", "インポートしたプリセットを書き込めません", "가져온 프리셋을 쓸 수 없습니다", "Impossible d'écrire le préréglage importé", "Importierte Voreinstellung kann nicht geschrieben werden", "No se puede escribir el preajuste importado", "Не удалось записать импортированный пресет" }},
+    {{ "Imported: {0}", "已导入：{0}", "已匯入：{0}", "インポート済み: {0}", "가져옴: {0}", "Importé : {0}", "Importiert: {0}", "Importado: {0}", "Импортировано: {0}" }},
+    {{ "Cannot read preset (use UTF-8 INI): {0}", "无法读取预设（请使用 UTF-8 INI）：{0}", "無法讀取預設（請使用 UTF-8 INI）：{0}", "プリセットを読み取れません（UTF-8 INIを使用）: {0}", "프리셋을 읽을 수 없습니다 (UTF-8 INI 사용): {0}", "Impossible de lire le préréglage (utilisez un INI UTF-8) : {0}", "Voreinstellung kann nicht gelesen werden (UTF-8-INI verwenden): {0}", "No se puede leer el preajuste (usa un INI UTF-8): {0}", "Не удалось прочитать пресет (используйте UTF-8 INI): {0}" }},
+    {{ "Auto-reloaded: {0}", "已自动重新加载：{0}", "已自動重新載入：{0}", "自動再読み込み: {0}", "자동 다시 로드됨: {0}", "Rechargé automatiquement : {0}", "Automatisch neu geladen: {0}", "Recargado automáticamente: {0}", "Автоматически перезагружено: {0}" }},
+    {{ "Applied: {0}", "已应用：{0}", "已套用：{0}", "適用済み: {0}", "적용됨: {0}", "Appliqué : {0}", "Angewendet: {0}", "Aplicado: {0}", "Применено: {0}" }},
+    {{ "Cleared; original ReShade/RenoDX settings restored", "已清除；已恢复原始 ReShade/RenoDX 设置", "已清除；已還原原始 ReShade/RenoDX 設定", "クリアしました。元の ReShade/RenoDX 設定を復元しました", "지웠습니다. 원래 ReShade/RenoDX 설정을 복원했습니다", "Effacé ; paramètres ReShade/RenoDX d'origine restaurés", "Gelöscht; ursprüngliche ReShade/RenoDX-Einstellungen wiederhergestellt", "Borrado; se restauró la configuración original de ReShade/RenoDX", "Очищено; исходные настройки ReShade/RenoDX восстановлены" }},
+};
+
+Language g_language = Language::English;
+std::string g_language_source;
+
+const char *Tr(TextId id)
+{
+    const size_t index = static_cast<size_t>(id);
+    const size_t language = static_cast<size_t>(g_language);
+    return kTranslations[index].text[language < 9 ? language : 0];
+}
+
+std::string FormatText(TextId id, const std::string &first = {}, const std::string &second = {})
+{
+    std::string result = Tr(id);
+    const auto replace = [&result](const char *token, const std::string &value) {
+        const size_t position = result.find(token);
+        if (position != std::string::npos)
+            result.replace(position, std::strlen(token), value);
+    };
+    replace("{0}", first);
+    replace("{1}", second);
+    return result;
+}
 
 fs::path g_addon_dir;
 std::vector<fs::path> g_presets;
@@ -51,6 +168,7 @@ fs::path g_active_path;
 fs::file_time_type g_active_write_time{};
 bool g_auto_reload = true;
 bool g_registered = false;
+std::string g_overlay_title;
 
 struct IniEntry {
     std::string section;
@@ -264,6 +382,70 @@ bool GetGlobalValue(const std::string &section, const std::string &key, std::str
         return false;
     value.assign(buffer);
     return true;
+}
+
+std::string PreferredSystemLanguage()
+{
+    ULONG count = 0;
+    ULONG size = 0;
+    if (!GetThreadPreferredUILanguages(MUI_LANGUAGE_NAME | MUI_UI_FALLBACK, &count, nullptr, &size) || size == 0)
+        return "en-US";
+
+    std::vector<wchar_t> languages(size);
+    if (!GetThreadPreferredUILanguages(MUI_LANGUAGE_NAME | MUI_UI_FALLBACK, &count,
+        languages.data(), &size) || count == 0)
+        return "en-US";
+
+    const wchar_t *first = languages.data();
+    const int length = WideCharToMultiByte(CP_UTF8, 0, first, -1, nullptr, 0, nullptr, nullptr);
+    if (length <= 1)
+        return "en-US";
+    std::string result(static_cast<size_t>(length), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, first, -1, result.data(), length, nullptr, nullptr);
+    result.resize(static_cast<size_t>(length - 1));
+    return result;
+}
+
+Language LanguageFromCode(std::string code)
+{
+    code = Lower(Trim(code));
+    std::replace(code.begin(), code.end(), '_', '-');
+    if (code.rfind("zh-tw", 0) == 0 || code.rfind("zh-hk", 0) == 0 ||
+        code.rfind("zh-hant", 0) == 0 || code.find("traditional") != std::string::npos)
+        return Language::TraditionalChinese;
+    if (code.rfind("zh", 0) == 0 || code.find("simplified") != std::string::npos)
+        return Language::SimplifiedChinese;
+    if (code.rfind("ja", 0) == 0)
+        return Language::Japanese;
+    if (code.rfind("ko", 0) == 0)
+        return Language::Korean;
+    if (code.rfind("fr", 0) == 0)
+        return Language::French;
+    if (code.rfind("de", 0) == 0)
+        return Language::German;
+    if (code.rfind("es", 0) == 0)
+        return Language::Spanish;
+    if (code.rfind("ru", 0) == 0)
+        return Language::Russian;
+    return Language::English;
+}
+
+void UpdateLanguage()
+{
+    std::string selected;
+    if (!GetGlobalValue("OVERLAY", "Language", selected) || Trim(selected).empty())
+        selected = PreferredSystemLanguage();
+    selected = Trim(selected);
+    if (selected.empty())
+        selected = "en-US";
+
+    if (selected == g_language_source)
+        return;
+    g_language_source = selected;
+    g_language = LanguageFromCode(selected);
+    // Do not leave a stale status message in the previous language after the
+    // user changes ReShade's language in the overlay settings.
+    g_status = Tr(TextId::Ready);
 }
 
 std::string ConfigIdentity(const std::string &section, const std::string &key)
@@ -568,36 +750,36 @@ void SharePreset(const fs::path &path)
 {
     std::string preset;
     if (!ReadText(path, preset) || preset.empty() || preset.size() > kMaxSharePayload) {
-        SetStatus("Cannot share this preset (empty, unreadable, or larger than 256 KiB)", reshade::log::level::warning);
+        SetStatus(Tr(TextId::CannotShare), reshade::log::level::warning);
         return;
     }
     if (!SetShareCodeText(EncodeShareCode(preset))) {
-        SetStatus("Share code is too large", reshade::log::level::warning);
+        SetStatus(Tr(TextId::ShareCodeTooLarge), reshade::log::level::warning);
         return;
     }
-    SetStatus("Share code generated: " + Utf8(path.filename()) + " (" +
-        std::to_string(ShareCodeText().size()) + " chars)");
+    SetStatus(FormatText(TextId::ShareGenerated, Utf8(path.filename()),
+        std::to_string(ShareCodeText().size())));
 }
 
 void CopyShareCode()
 {
     const std::string code = ShareCodeText();
     if (code.empty()) {
-        SetStatus("Generate or paste a share code first", reshade::log::level::warning);
+        SetStatus(Tr(TextId::GenerateFirst), reshade::log::level::warning);
         return;
     }
     ImGui::SetClipboardText(code.c_str());
-    SetStatus("Share code copied to clipboard");
+    SetStatus(Tr(TextId::ShareCopied));
 }
 
 void PasteShareCode()
 {
     const char *clipboard = ImGui::GetClipboardText();
     if (clipboard == nullptr || !SetShareCodeText(clipboard)) {
-        SetStatus("Clipboard is empty or the share code is too large", reshade::log::level::warning);
+        SetStatus(Tr(TextId::ClipboardInvalid), reshade::log::level::warning);
         return;
     }
-    SetStatus("Share code pasted; click Import preset to receive it");
+    SetStatus(Tr(TextId::SharePasted));
 }
 
 bool WritePreset(const fs::path &path, const std::string &preset)
@@ -614,26 +796,26 @@ void ImportShareCode(reshade::api::effect_runtime *runtime, bool apply)
     std::string preset;
     uint32_t checksum = 0;
     if (!DecodeShareCode(ShareCodeText(), preset, checksum)) {
-        SetStatus("Invalid or corrupted D5P1 share code", reshade::log::level::warning);
+        SetStatus(Tr(TextId::InvalidShareCode), reshade::log::level::warning);
         return;
     }
     const fs::path directory = g_addon_dir / kPresetFolder;
     std::error_code error;
     fs::create_directories(directory, error);
     if (error) {
-        SetStatus("Cannot create DLSS5-Presets directory", reshade::log::level::warning);
+        SetStatus(Tr(TextId::CreateDirectory), reshade::log::level::warning);
         return;
     }
     const fs::path target = UniquePresetPath(directory, SafePresetName(g_import_name.data(), checksum));
     if (!WritePreset(target, preset)) {
-        SetStatus("Cannot write imported preset", reshade::log::level::warning);
+        SetStatus(Tr(TextId::WriteImported), reshade::log::level::warning);
         return;
     }
     RefreshPresets();
     if (apply)
         ApplyPreset(runtime, target, false);
     else
-        SetStatus("Imported: " + Utf8(target.filename()));
+        SetStatus(FormatText(TextId::Imported, Utf8(target.filename())));
 }
 
 std::string CurrentPresetPath(reshade::api::effect_runtime *runtime)
@@ -649,7 +831,7 @@ bool ApplyPreset(reshade::api::effect_runtime *runtime, const fs::path &path, bo
 {
     IniFile ini;
     if (!ParseIni(path, ini)) {
-        SetStatus("Cannot read preset (use UTF-8 INI): " + Utf8(path.filename()), reshade::log::level::warning);
+        SetStatus(FormatText(TextId::CannotRead, Utf8(path.filename())), reshade::log::level::warning);
         return false;
     }
 
@@ -675,7 +857,7 @@ bool ApplyPreset(reshade::api::effect_runtime *runtime, const fs::path &path, bo
     g_active_name = Utf8(path.filename());
     std::error_code error;
     g_active_write_time = fs::last_write_time(path, error);
-    SetStatus(std::string(automatic ? "Auto-reloaded: " : "Applied: ") + g_active_name);
+    SetStatus(FormatText(automatic ? TextId::AutoReloaded : TextId::Applied, g_active_name));
     return true;
 }
 
@@ -689,7 +871,7 @@ void ClearPreset(reshade::api::effect_runtime *runtime)
     g_original_preset_path.clear();
     g_baseline.clear();
     g_baseline_captured = false;
-    SetStatus("Cleared; original ReShade/RenoDX settings restored");
+    SetStatus(Tr(TextId::Cleared));
 }
 
 void AutoReloadIfChanged(reshade::api::effect_runtime *runtime)
@@ -704,19 +886,20 @@ void AutoReloadIfChanged(reshade::api::effect_runtime *runtime)
 
 void DrawOverlay(reshade::api::effect_runtime *runtime)
 {
+    UpdateLanguage();
     RefreshPresets();
     AutoReloadIfChanged(runtime);
 
-    ImGui::Text("Drop UTF-8 .ini files beside the add-on or in DLSS5-Presets\\");
-    ImGui::Text("RenoDX sections are applied through ReShade config API.");
-    ImGui::Checkbox("Auto-reload active file", &g_auto_reload);
+    ImGui::Text("%s", Tr(TextId::DropHint));
+    ImGui::Text("%s", Tr(TextId::RenoHint));
+    ImGui::Checkbox(Tr(TextId::AutoReload), &g_auto_reload);
     ImGui::SameLine();
-    if (ImGui::Button("Refresh files"))
+    if (ImGui::Button(Tr(TextId::Refresh)))
         RefreshPresets();
     ImGui::Separator();
 
     if (g_presets.empty()) {
-        ImGui::TextDisabled("No .ini presets found.");
+        ImGui::TextDisabled("%s", Tr(TextId::NoPresets));
     } else {
         for (size_t i = 0; i < g_presets.size(); ++i) {
             const fs::path &path = g_presets[i];
@@ -726,44 +909,44 @@ void DrawOverlay(reshade::api::effect_runtime *runtime)
             if (ImGui::Selectable(label.c_str(), active))
                 ApplyPreset(runtime, path, false);
             ImGui::SameLine();
-            if (ImGui::SmallButton("Apply"))
+            if (ImGui::SmallButton(Tr(TextId::Apply)))
                 ApplyPreset(runtime, path, false);
             ImGui::SameLine();
-            if (ImGui::SmallButton("Share"))
+            if (ImGui::SmallButton(Tr(TextId::Share)))
                 SharePreset(path);
             ImGui::PopID();
         }
     }
 
     ImGui::Separator();
-    ImGui::Text("Quick share (one preset per code; compressed and clipboard-safe):");
-    ImGui::InputText("Import filename", g_import_name.data(), g_import_name.size());
+    ImGui::Text("%s", Tr(TextId::QuickShare));
+    ImGui::InputText(Tr(TextId::ImportFilename), g_import_name.data(), g_import_name.size());
     ImGui::InputTextMultiline("##dlss5_share_code", g_share_code.data(), g_share_code.size(), ImVec2(-1, 120));
-    if (ImGui::Button("Copy code"))
+    if (ImGui::Button(Tr(TextId::CopyCode)))
         CopyShareCode();
     ImGui::SameLine();
-    if (ImGui::Button("Paste code"))
+    if (ImGui::Button(Tr(TextId::PasteCode)))
         PasteShareCode();
     ImGui::SameLine();
-    if (ImGui::Button("Import preset"))
+    if (ImGui::Button(Tr(TextId::ImportPreset)))
         ImportShareCode(runtime, false);
     ImGui::SameLine();
-    if (ImGui::Button("Import & apply"))
+    if (ImGui::Button(Tr(TextId::ImportAndApply)))
         ImportShareCode(runtime, true);
     if (!g_active_path.empty()) {
         ImGui::SameLine();
-        if (ImGui::Button("Share active"))
+        if (ImGui::Button(Tr(TextId::ShareActive)))
             SharePreset(g_active_path);
     }
-    ImGui::Text("Code length: %zu characters", ShareCodeText().size());
+    ImGui::Text("%s: %zu", Tr(TextId::CodeLength), ShareCodeText().size());
 
     ImGui::Separator();
-    if (ImGui::Button("Clear / restore original"))
+    if (ImGui::Button(Tr(TextId::ClearRestore)))
         ClearPreset(runtime);
     ImGui::SameLine();
     ImGui::Text("%s", g_status.c_str());
     if (!g_active_name.empty())
-        ImGui::Text("Active: %s", g_active_name.c_str());
+        ImGui::Text("%s", FormatText(TextId::Active, g_active_name).c_str());
 }
 
 } // namespace
@@ -784,11 +967,13 @@ BOOL WINAPI DllMain(HMODULE module, DWORD reason, LPVOID reserved)
         if (!reshade::register_addon(module))
             return FALSE;
         g_registered = true;
-        reshade::register_overlay(kOverlayTitle, DrawOverlay);
+        UpdateLanguage();
+        g_overlay_title = Tr(TextId::OverlayTitle);
+        reshade::register_overlay(g_overlay_title.c_str(), DrawOverlay);
         Log(std::string(kName) + " " + kVersion + " loaded; " + std::to_string(g_presets.size()) + " preset(s)");
     } else if (reason == DLL_PROCESS_DETACH && reserved == nullptr) {
         if (g_registered) {
-            reshade::unregister_overlay(kOverlayTitle, DrawOverlay);
+            reshade::unregister_overlay(g_overlay_title.c_str(), DrawOverlay);
             reshade::unregister_addon(module);
             g_registered = false;
         }
