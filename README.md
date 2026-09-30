@@ -16,7 +16,7 @@
 <HoYoShade>\reshade-shaders\Addons\DLSS5-Presets\
 ```
 
-也可以直接把 `.ini` 放在 `.addon64` 旁边。`DLSS5-Presets` 会递归扫描子目录，方便按游戏或作者整理。插件不会删除文件；在资源管理器中添加或删除文件后，在游戏内点击 **Refresh files** 即可更新列表。
+插件只从 `DLSS5-Presets\` 文件夹读取预设（不会扫描插件同目录）。该文件夹会递归扫描子目录，方便按游戏或作者整理。插件不会删除文件；在资源管理器中添加或删除文件后，在游戏内点击 **Refresh files** 即可更新列表。
 
 ## 预设格式
 

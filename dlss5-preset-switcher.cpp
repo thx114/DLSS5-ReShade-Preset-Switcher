@@ -1,7 +1,8 @@
 // DLSS5 Preset Switcher - a small ReShade add-on for live INI presets.
 //
-// Presets are ordinary UTF-8 INI files placed beside this add-on or under
-// DLSS5-Presets\. The add-on switches ReShade effect presets when an INI has
+// Presets are ordinary UTF-8 INI files placed under the DLSS5-Presets\
+// folder (scanned recursively). The add-on switches ReShade effect presets
+// when an INI has
 // effect sections, and writes RenoDX/DLSS5 sections through ReShade's config
 // API so renodx-dlss.addon64 and renodx-dlss5.addon64 can observe the change.
 //
@@ -39,7 +40,7 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr const char *kName = "DLSS5 Preset Switcher";
-constexpr const char *kVersion = "1.2.0";
+constexpr const char *kVersion = "1.2.1";
 constexpr const char *kOverlayTitle = "DLSS5 Presets";
 constexpr const char *kConfigFile = "dlss5-preset-switcher.ini";
 constexpr const char *kPresetFolder = "DLSS5-Presets";
@@ -102,7 +103,7 @@ struct Translation {
 // ReShade add-on SDK does not expose the host's localization resources.
 const Translation kTranslations[] = {
     {{ "DLSS5 Presets", "DLSS5 预设", "DLSS5 預設", "DLSS5 プリセット", "DLSS5 프리셋", "Préréglages DLSS5", "DLSS5-Voreinstellungen", "Preajustes DLSS5", "Пресеты DLSS5" }},
-    {{ "Drop UTF-8 .ini files beside the add-on or in DLSS5-Presets\\", "将 UTF-8 .ini 文件放在插件旁边或 DLSS5-Presets\\ 中", "將 UTF-8 .ini 檔案放在外掛程式旁或 DLSS5-Presets\\ 中", "UTF-8 の .ini ファイルをアドオンの隣または DLSS5-Presets\\ に置いてください", "UTF-8 .ini 파일을 애드온 옆 또는 DLSS5-Presets\\에 넣으세요", "Placez les fichiers .ini UTF-8 à côté de l'add-on ou dans DLSS5-Presets\\", "Legen Sie UTF-8-.ini-Dateien neben das Add-on oder in DLSS5-Presets\\", "Coloca los archivos .ini UTF-8 junto al complemento o en DLSS5-Presets\\", "Поместите UTF-8 .ini рядом с аддоном или в DLSS5-Presets\\" }},
+    {{ "Drop UTF-8 .ini files into the DLSS5-Presets\\ folder", "将 UTF-8 .ini 文件放入 DLSS5-Presets\\ 文件夹", "將 UTF-8 .ini 檔案放入 DLSS5-Presets\\ 資料夾", "UTF-8 の .ini ファイルを DLSS5-Presets\\ フォルダーに置いてください", "UTF-8 .ini 파일을 DLSS5-Presets\\ 폭더에 넣으세요", "Placez les fichiers .ini UTF-8 dans le dossier DLSS5-Presets\\", "Legen Sie UTF-8-.ini-Dateien in den Ordner DLSS5-Presets\\", "Coloca los archivos .ini UTF-8 en la carpeta DLSS5-Presets\\", "Поместите UTF-8 .ini в папку DLSS5-Presets\\" }},
     {{ "RenoDX sections are applied through ReShade config API.", "RenoDX 配置段通过 ReShade 配置 API 应用。", "RenoDX 設定區段會透過 ReShade 設定 API 套用。", "RenoDX セクションは ReShade 設定 API 経由で適用されます。", "RenoDX 섹션은 ReShade 구성 API를 통해 적용됩니다.", "Les sections RenoDX sont appliquées via l'API de configuration de ReShade.", "RenoDX-Abschnitte werden über die ReShade-Konfigurations-API angewendet.", "Las secciones de RenoDX se aplican mediante la API de configuración de ReShade.", "Разделы RenoDX применяются через API конфигурации ReShade." }},
     {{ "Auto-reload active file", "自动重新加载当前文件", "自動重新載入目前檔案", "アクティブなファイルを自動再読み込み", "활성 파일 자동 다시 로드", "Recharger automatiquement le fichier actif", "Aktive Datei automatisch neu laden", "Recargar automáticamente el archivo activo", "Автоматически перезагружать активный файл" }},
     {{ "Refresh files", "刷新文件", "重新整理檔案", "ファイルを更新", "파일 새로 고침", "Actualiser les fichiers", "Dateien aktualisieren", "Actualizar archivos", "Обновить файлы" }},
@@ -341,9 +342,8 @@ void RefreshPresets()
 {
     g_presets.clear();
     std::set<std::string> seen;
-    // Direct INIs preserve the requested "put it next to the plugin" workflow.
-    ScanPresetDirectory(g_addon_dir, false, seen);
-    // The subfolder is recommended and can be organized recursively.
+    // Presets are only scanned inside the DLSS5-Presets subfolder, which is
+    // scanned recursively so presets can be organized per game or author.
     ScanPresetDirectory(g_addon_dir / kPresetFolder, true, seen);
     std::sort(g_presets.begin(), g_presets.end(), [](const fs::path &a, const fs::path &b) {
         return Lower(a.filename().string()) < Lower(b.filename().string());
