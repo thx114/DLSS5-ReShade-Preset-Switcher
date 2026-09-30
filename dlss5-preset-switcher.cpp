@@ -18,7 +18,11 @@
 #include <reshade.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -34,7 +38,7 @@ namespace fs = std::filesystem;
 namespace {
 
 constexpr const char *kName = "DLSS5 Preset Switcher";
-constexpr const char *kVersion = "1.0.0";
+constexpr const char *kVersion = "1.1.0";
 constexpr const char *kOverlayTitle = "DLSS5 Presets";
 constexpr const char *kConfigFile = "dlss5-preset-switcher.ini";
 constexpr const char *kPresetFolder = "DLSS5-Presets";
@@ -70,6 +74,13 @@ struct BaselineValue {
 std::map<std::string, BaselineValue> g_baseline;
 std::string g_original_preset_path;
 bool g_baseline_captured = false;
+
+constexpr size_t kMaxSharePayload = 256 * 1024;
+constexpr size_t kShareTextCapacity = 512 * 1024;
+std::vector<char> g_share_code(kShareTextCapacity, '\0');
+std::array<char, 128> g_import_name{};
+
+bool ApplyPreset(reshade::api::effect_runtime *runtime, const fs::path &path, bool automatic);
 
 std::string Lower(std::string value)
 {
@@ -280,6 +291,351 @@ void RestoreBaseline()
     }
 }
 
+uint32_t Crc32(const std::string &data)
+{
+    uint32_t crc = 0xFFFFFFFFu;
+    for (const unsigned char byte : data) {
+        crc ^= byte;
+        for (int bit = 0; bit < 8; ++bit)
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return ~crc;
+}
+
+uint16_t Hash3(const std::string &data, size_t position)
+{
+    return static_cast<uint16_t>((static_cast<uint32_t>(static_cast<unsigned char>(data[position])) * 251u +
+        static_cast<uint32_t>(static_cast<unsigned char>(data[position + 1])) * 17u +
+        static_cast<uint32_t>(static_cast<unsigned char>(data[position + 2]))) & 0xFFFFu);
+}
+
+std::vector<uint8_t> CompressPreset(const std::string &input)
+{
+    std::vector<uint8_t> output;
+    output.reserve(input.size());
+    std::vector<int> head(65536, -1);
+    std::vector<int> previous(input.size(), -1);
+
+    auto add_position = [&](size_t position) {
+        if (position + 2 >= input.size())
+            return;
+        const uint16_t hash = Hash3(input, position);
+        previous[position] = head[hash];
+        head[hash] = static_cast<int>(position);
+    };
+
+    size_t position = 0;
+    while (position < input.size()) {
+        const size_t control_index = output.size();
+        output.push_back(0);
+        uint8_t controls = 0;
+
+        for (int bit = 0; bit < 8 && position < input.size(); ++bit) {
+            size_t best_length = 0;
+            size_t best_offset = 0;
+            if (position + 2 < input.size()) {
+                const uint16_t hash = Hash3(input, position);
+                int candidate = head[hash];
+                size_t candidates = 0;
+                const size_t oldest = position > 4096 ? position - 4096 : 0;
+                while (candidate >= static_cast<int>(oldest) && candidate >= 0 && candidates++ < 64) {
+                    size_t length = 0;
+                    while (length < 18 && position + length < input.size() &&
+                        static_cast<size_t>(candidate) + length < input.size() &&
+                        input[static_cast<size_t>(candidate) + length] == input[position + length])
+                        ++length;
+                    if (length > best_length && length >= 3) {
+                        best_length = length;
+                        best_offset = position - static_cast<size_t>(candidate);
+                        if (length == 18)
+                            break;
+                    }
+                    candidate = previous[static_cast<size_t>(candidate)];
+                }
+            }
+
+            if (best_length >= 3) {
+                const uint16_t token = static_cast<uint16_t>(((best_offset - 1) << 4) | (best_length - 3));
+                output.push_back(static_cast<uint8_t>(token & 0xFF));
+                output.push_back(static_cast<uint8_t>(token >> 8));
+                for (size_t i = 0; i < best_length; ++i)
+                    add_position(position++);
+            } else {
+                controls |= static_cast<uint8_t>(1u << bit);
+                output.push_back(static_cast<uint8_t>(input[position]));
+                add_position(position++);
+            }
+        }
+        output[control_index] = controls;
+    }
+    return output;
+}
+
+bool DecompressPreset(const std::vector<uint8_t> &input, size_t expected_size, std::string &output)
+{
+    output.clear();
+    output.reserve(expected_size);
+    size_t position = 0;
+    while (position < input.size() && output.size() < expected_size) {
+        const uint8_t controls = input[position++];
+        for (int bit = 0; bit < 8 && output.size() < expected_size; ++bit) {
+            if (controls & (1u << bit)) {
+                if (position >= input.size())
+                    return false;
+                output.push_back(static_cast<char>(input[position++]));
+                continue;
+            }
+            if (position + 1 >= input.size())
+                return false;
+            const uint16_t token = static_cast<uint16_t>(input[position]) |
+                (static_cast<uint16_t>(input[position + 1]) << 8);
+            position += 2;
+            const size_t offset = static_cast<size_t>(token >> 4) + 1;
+            const size_t length = static_cast<size_t>(token & 0x0F) + 3;
+            if (offset > output.size() || output.size() + length > expected_size)
+                return false;
+            for (size_t i = 0; i < length; ++i)
+                output.push_back(output[output.size() - offset]);
+        }
+    }
+    return output.size() == expected_size && position == input.size();
+}
+
+const char *const kShareAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+std::string EncodeShareBase64(const std::vector<uint8_t> &data)
+{
+    std::string output;
+    output.reserve((data.size() * 4 + 2) / 3);
+    for (size_t i = 0; i < data.size(); i += 3) {
+        const uint32_t value = static_cast<uint32_t>(data[i]) << 16 |
+            (i + 1 < data.size() ? static_cast<uint32_t>(data[i + 1]) << 8 : 0) |
+            (i + 2 < data.size() ? data[i + 2] : 0);
+        output.push_back(kShareAlphabet[(value >> 18) & 63]);
+        output.push_back(kShareAlphabet[(value >> 12) & 63]);
+        if (i + 1 < data.size())
+            output.push_back(kShareAlphabet[(value >> 6) & 63]);
+        if (i + 2 < data.size())
+            output.push_back(kShareAlphabet[value & 63]);
+    }
+    return output;
+}
+
+int ShareBase64Value(char character)
+{
+    if (character >= 'A' && character <= 'Z')
+        return character - 'A';
+    if (character >= 'a' && character <= 'z')
+        return character - 'a' + 26;
+    if (character >= '0' && character <= '9')
+        return character - '0' + 52;
+    if (character == '-' || character == '+')
+        return 62;
+    if (character == '_' || character == '/')
+        return 63;
+    return -1;
+}
+
+bool DecodeShareBase64(const std::string &text, std::vector<uint8_t> &output)
+{
+    output.clear();
+    uint32_t value = 0;
+    int bits = 0;
+    for (const unsigned char character : text) {
+        if (std::isspace(character) || character == '=')
+            continue;
+        const int decoded = ShareBase64Value(static_cast<char>(character));
+        if (decoded < 0)
+            return false;
+        value = (value << 6) | static_cast<uint32_t>(decoded);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            output.push_back(static_cast<uint8_t>((value >> bits) & 0xFF));
+        }
+        if (output.size() > kMaxSharePayload + 16)
+            return false;
+    }
+    return bits < 6;
+}
+
+void AppendUint32(std::vector<uint8_t> &data, uint32_t value)
+{
+    data.push_back(static_cast<uint8_t>(value));
+    data.push_back(static_cast<uint8_t>(value >> 8));
+    data.push_back(static_cast<uint8_t>(value >> 16));
+    data.push_back(static_cast<uint8_t>(value >> 24));
+}
+
+uint32_t ReadUint32(const std::vector<uint8_t> &data, size_t offset)
+{
+    return static_cast<uint32_t>(data[offset]) |
+        (static_cast<uint32_t>(data[offset + 1]) << 8) |
+        (static_cast<uint32_t>(data[offset + 2]) << 16) |
+        (static_cast<uint32_t>(data[offset + 3]) << 24);
+}
+
+std::string EncodeShareCode(const std::string &preset)
+{
+    const std::vector<uint8_t> compressed = CompressPreset(preset);
+    const bool use_compression = compressed.size() + 1 < preset.size();
+    std::vector<uint8_t> packet;
+    packet.reserve((use_compression ? compressed.size() : preset.size()) + 9);
+    packet.push_back(use_compression ? 1 : 0);
+    AppendUint32(packet, static_cast<uint32_t>(preset.size()));
+    AppendUint32(packet, Crc32(preset));
+    if (use_compression)
+        packet.insert(packet.end(), compressed.begin(), compressed.end());
+    else
+        packet.insert(packet.end(), preset.begin(), preset.end());
+    return std::string("D5P1") + EncodeShareBase64(packet);
+}
+
+bool DecodeShareCode(const std::string &code, std::string &preset, uint32_t &checksum)
+{
+    const size_t first = code.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos || code.compare(first, 4, "D5P1") != 0)
+        return false;
+    std::vector<uint8_t> packet;
+    if (!DecodeShareBase64(code.substr(first + 4), packet) || packet.size() < 9)
+        return false;
+    const uint8_t flags = packet[0];
+    const size_t expected_size = ReadUint32(packet, 1);
+    checksum = ReadUint32(packet, 5);
+    if (expected_size == 0 || expected_size > kMaxSharePayload)
+        return false;
+    if (flags == 0) {
+        if (packet.size() - 9 != expected_size)
+            return false;
+        preset.assign(reinterpret_cast<const char *>(packet.data() + 9), expected_size);
+    } else if (flags == 1) {
+        std::vector<uint8_t> compressed(packet.begin() + 9, packet.end());
+        if (!DecompressPreset(compressed, expected_size, preset))
+            return false;
+    } else {
+        return false;
+    }
+    return !preset.empty() && preset.find('\0') == std::string::npos && Crc32(preset) == checksum;
+}
+
+std::string ShareChecksumName(uint32_t checksum)
+{
+    char name[32] = {};
+    sprintf_s(name, "Shared-%08X.ini", checksum);
+    return name;
+}
+
+bool SetShareCodeText(const std::string &code)
+{
+    if (code.size() >= g_share_code.size())
+        return false;
+    std::memcpy(g_share_code.data(), code.data(), code.size());
+    g_share_code[code.size()] = '\0';
+    return true;
+}
+
+std::string ShareCodeText()
+{
+    return std::string(g_share_code.data());
+}
+
+std::string SafePresetName(const std::string &requested, uint32_t checksum)
+{
+    std::string name = Trim(requested);
+    for (char &character : name) {
+        if (character == '/' || character == '\\' || character == ':' || character == '*' ||
+            character == '?' || character == '"' || character == '<' || character == '>' || character == '|')
+            character = '_';
+    }
+    if (name.empty() || name == "." || name == "..")
+        name = ShareChecksumName(checksum);
+    if (Lower(fs::path(name).extension().string()) != ".ini")
+        name += ".ini";
+    return fs::path(name).filename().string();
+}
+
+fs::path UniquePresetPath(const fs::path &directory, const std::string &name)
+{
+    fs::path result = directory / name;
+    const fs::path stem = result.stem();
+    const fs::path extension = result.extension();
+    for (int suffix = 2; fs::exists(result); ++suffix)
+        result = directory / (stem.string() + "-" + std::to_string(suffix) + extension.string());
+    return result;
+}
+
+void SharePreset(const fs::path &path)
+{
+    std::string preset;
+    if (!ReadText(path, preset) || preset.empty() || preset.size() > kMaxSharePayload) {
+        SetStatus("Cannot share this preset (empty, unreadable, or larger than 256 KiB)", reshade::log::level::warning);
+        return;
+    }
+    if (!SetShareCodeText(EncodeShareCode(preset))) {
+        SetStatus("Share code is too large", reshade::log::level::warning);
+        return;
+    }
+    SetStatus("Share code generated: " + Utf8(path.filename()) + " (" +
+        std::to_string(ShareCodeText().size()) + " chars)");
+}
+
+void CopyShareCode()
+{
+    const std::string code = ShareCodeText();
+    if (code.empty()) {
+        SetStatus("Generate or paste a share code first", reshade::log::level::warning);
+        return;
+    }
+    ImGui::SetClipboardText(code.c_str());
+    SetStatus("Share code copied to clipboard");
+}
+
+void PasteShareCode()
+{
+    const char *clipboard = ImGui::GetClipboardText();
+    if (clipboard == nullptr || !SetShareCodeText(clipboard)) {
+        SetStatus("Clipboard is empty or the share code is too large", reshade::log::level::warning);
+        return;
+    }
+    SetStatus("Share code pasted; click Import preset to receive it");
+}
+
+bool WritePreset(const fs::path &path, const std::string &preset)
+{
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+        return false;
+    file.write(preset.data(), static_cast<std::streamsize>(preset.size()));
+    return file.good();
+}
+
+void ImportShareCode(reshade::api::effect_runtime *runtime, bool apply)
+{
+    std::string preset;
+    uint32_t checksum = 0;
+    if (!DecodeShareCode(ShareCodeText(), preset, checksum)) {
+        SetStatus("Invalid or corrupted D5P1 share code", reshade::log::level::warning);
+        return;
+    }
+    const fs::path directory = g_addon_dir / kPresetFolder;
+    std::error_code error;
+    fs::create_directories(directory, error);
+    if (error) {
+        SetStatus("Cannot create DLSS5-Presets directory", reshade::log::level::warning);
+        return;
+    }
+    const fs::path target = UniquePresetPath(directory, SafePresetName(g_import_name.data(), checksum));
+    if (!WritePreset(target, preset)) {
+        SetStatus("Cannot write imported preset", reshade::log::level::warning);
+        return;
+    }
+    RefreshPresets();
+    if (apply)
+        ApplyPreset(runtime, target, false);
+    else
+        SetStatus("Imported: " + Utf8(target.filename()));
+}
+
 std::string CurrentPresetPath(reshade::api::effect_runtime *runtime)
 {
     if (runtime == nullptr)
@@ -372,9 +728,34 @@ void DrawOverlay(reshade::api::effect_runtime *runtime)
             ImGui::SameLine();
             if (ImGui::SmallButton("Apply"))
                 ApplyPreset(runtime, path, false);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Share"))
+                SharePreset(path);
             ImGui::PopID();
         }
     }
+
+    ImGui::Separator();
+    ImGui::Text("Quick share (one preset per code; compressed and clipboard-safe):");
+    ImGui::InputText("Import filename", g_import_name.data(), g_import_name.size());
+    ImGui::InputTextMultiline("##dlss5_share_code", g_share_code.data(), g_share_code.size(), ImVec2(-1, 120));
+    if (ImGui::Button("Copy code"))
+        CopyShareCode();
+    ImGui::SameLine();
+    if (ImGui::Button("Paste code"))
+        PasteShareCode();
+    ImGui::SameLine();
+    if (ImGui::Button("Import preset"))
+        ImportShareCode(runtime, false);
+    ImGui::SameLine();
+    if (ImGui::Button("Import & apply"))
+        ImportShareCode(runtime, true);
+    if (!g_active_path.empty()) {
+        ImGui::SameLine();
+        if (ImGui::Button("Share active"))
+            SharePreset(g_active_path);
+    }
+    ImGui::Text("Code length: %zu characters", ShareCodeText().size());
 
     ImGui::Separator();
     if (ImGui::Button("Clear / restore original"))

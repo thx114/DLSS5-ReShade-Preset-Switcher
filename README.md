@@ -32,9 +32,15 @@
 打开 ReShade overlay 后进入 **DLSS5 Presets**：
 
 - 点击预设名称或 **Apply**：应用该文件；
+- 每个预设旁的 **Share**：生成一个只包含该预设的短分享码；
+- **Copy code** / **Paste code**：通过剪贴板发送或接收分享码；
+- **Import preset**：将分享码解码后保存到 `DLSS5-Presets\`；
+- **Import & apply**：接收后立即应用该预设；
 - **Refresh files**：重新扫描新增/删除的 `.ini`；
 - **Auto-reload active file**：当前文件的修改时间变化后自动重新应用；
 - **Clear / restore original**：恢复第一次应用前的 RenoDX/DLSS5 配置和 ReShade 当前 preset。
+
+分享码以 `D5P1` 开头，使用内置 LZ 压缩、URL 安全 Base64 和 CRC 校验，不需要网络或服务器。一个分享码只包含一个 `.ini` 预设，接收端默认保存为 `Shared-XXXXXXXX.ini`；也可以在 **Import filename** 中指定文件名。预设内容上限为 256 KiB，分享码可以直接复制到聊天软件。
 
 首次应用后，插件会保留本次会话的原始配置作为恢复基线。重新启动游戏会建立新的基线。
 
